@@ -251,8 +251,8 @@ const StreamerGame = () => {
             // I will leave High/Low dynamic but ensure they respect the 2x floor if applicable. 
             // However, for the MAIN game (gap > 0), it is now typically 2x fixed.
 
-            if (highCount > 0) hlOdds.high = Math.floor((13.0 / highCount) * 0.95 * 100) / 100; // Removed pool bonus, slight house edge
-            if (lowCount > 0) hlOdds.low = Math.floor((13.0 / lowCount) * 0.95 * 100) / 100;
+            if (highCount > 0) hlOdds.high = 2.0;
+            if (lowCount > 0) hlOdds.low = 2.0;
         }
 
         // 3. Bankruptcy Protection (Cannot payout more than pool)
