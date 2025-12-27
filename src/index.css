@@ -1,13 +1,17 @@
 :root {
-  --bg-dark: #2c2c54;
-  --bg-panel: #474787;
-  --primary: #ffeaa7;
-  --primary-dark: #fdcb6e;
-  --accent: #ff9ff3;
-  --success: #55efc4;
-  --danger: #ff7675;
-  --text-main: #ffffff;
-  --text-dim: #dfe6e9;
+  --bg-dark: #2f3640;
+  /* Soft Dark Grey/Blue */
+  --bg-panel: #353b48;
+  --primary: #feca57;
+  /* Warm Gold */
+  --primary-dark: #ff9f43;
+  --accent: #54a0ff;
+  /* Soft Blue (No Pink) */
+  --success: #1dd1a1;
+  --danger: #ff6b6b;
+  /* Soft Red */
+  --text-main: #f5f6fa;
+  --text-dim: #dcdde1;
   --card-width: 150px;
   --card-height: 220px;
   --radius-l: 30px;
@@ -23,27 +27,33 @@
 }
 
 body {
-  background: var(--bg-dark);
+  background: url('/img/背景.png') no-repeat center bottom / cover fixed;
+  /* Fix bottom black bar */
   color: var(--text-main);
   height: 100vh;
+  width: 100vw;
   overflow: hidden;
+  margin: 0;
+  padding: 0;
 }
 
 .app-container {
   display: flex;
   height: 100%;
+  width: 100%;
 }
 
 /* === Game Stage (OBS Area) === */
 .game-stage {
   flex: 1;
-  background: radial-gradient(circle at center, #40407a 0%, #2c2c54 100%);
+  background: url('/img/背景.png') no-repeat center center/cover;
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-right: 4px solid rgba(0, 0, 0, 0.2);
+  border-right: none;
+  /* Image provides border likely */
 }
 
 .streamer-info {
@@ -189,6 +199,8 @@ body {
 }
 
 .current-player {
+  position: relative;
+  /* Removed absolute positioning */
   display: flex;
   align-items: center;
   gap: 15px;
@@ -196,8 +208,8 @@ body {
   padding: 12px 25px;
   border-radius: 50px;
   border: 2px solid rgba(255, 255, 255, 0.2);
-  /* transform: translateY(20px); In React we might toggle visibility instead of hidden class */
   transition: 0.3s;
+  z-index: 10;
 }
 
 .player-avatar {
@@ -231,19 +243,23 @@ body {
 /* === Controls Overlay === */
 .controls-overlay {
   position: absolute;
-  bottom: 10px;
+  bottom: 40px;
+  left: 0;
+  width: 100%;
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  justify-content: center;
   gap: 20px;
   z-index: 20;
+  margin-top: 30px;
+  /* Added spacing */
 }
 
 /* === Sidebar === */
 .dashboard-sidebar {
   width: 380px;
-  background: var(--bg-panel);
-  border-left: 4px solid rgba(0, 0, 0, 0.2);
+  background: url('/img/右側.png') no-repeat center center/cover;
+  border-left: none;
+  /* Image acts as border */
   display: flex;
   flex-direction: column;
   padding: 25px;
@@ -257,10 +273,12 @@ body {
 }
 
 .panel-card {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.6);
   border-radius: var(--radius-m);
   padding: 15px;
   margin-bottom: 20px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .panel-card h3 {
@@ -321,9 +339,10 @@ button {
 }
 
 .btn-action {
-  background: linear-gradient(to bottom, #ff9ff3, #f368e0);
+  background: linear-gradient(135deg, #54a0ff 0%, #2e86de 100%);
+  /* Blue Gradient */
   color: white;
-  box-shadow: 0 6px 0 #c445b0;
+  box-shadow: 0 6px 0 #2980b9;
   font-size: 1.5rem;
   padding: 12px 30px;
 }
@@ -334,7 +353,7 @@ button {
   border-radius: 20px;
   padding: 8px 16px;
   font-weight: bold;
-  box-shadow: 0 4px 0 #c445b0;
+  box-shadow: 0 4px 0 #2980b9;
   font-size: 0.9rem;
 }
 
@@ -366,7 +385,7 @@ button {
   color: white;
   padding: 10px 20px;
   border-radius: 50px;
-  box-shadow: 0 4px 0 #c445b0;
+  box-shadow: 0 4px 0 #2980b9;
   font-weight: 900;
 }
 
@@ -436,15 +455,16 @@ button {
 
 /* === Queue List === */
 .queue-list {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.4);
   border-radius: var(--radius-m);
   padding: 10px;
   max-height: 200px;
   overflow-y: auto;
+  backdrop-filter: blur(5px);
 }
 
 .queue-item {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.4);
   border-radius: var(--radius-s);
   padding: 10px;
   margin-bottom: 8px;
@@ -515,29 +535,138 @@ dialog {
   background: transparent;
   margin: auto;
   overflow: visible;
+  z-index: 1000;
+  /* Ensure above controls */
 }
 
 .modal-wrapper {
   background: var(--bg-panel);
-  padding: 30px;
+  padding: 0;
+  /* Remove padding for borderless effect */
   border-radius: var(--radius-l);
   width: 400px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   border: 4px solid var(--accent);
+  overflow: hidden;
+  /* Clip content to border radius */
   color: white;
+  position: relative;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* Specific Backgrounds */
+.modal-add {
+  background-image: url('/img/新增挑戰者.png');
+  border: none;
+  /* Image likely has border */
+  background-color: transparent;
+}
+
+.modal-import {
+  background-image: url('/img/鏈上匯入.png');
+  border: none;
+  background-color: transparent;
+}
+
+.modal-replay {
+  background-image: url('/img/再來一局.png');
+  border: none;
+  background-color: transparent;
+}
+
+/* Right-aligned modal for results */
+.side-modal-wrapper {
+  position: fixed;
+  right: 400px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+  width: 350px;
+  background: var(--bg-panel);
+  padding: 25px;
+  border-radius: var(--radius-l);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  border: 4px solid var(--success);
+  color: white;
+  z-index: 100;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+.modal-payout {
+  background-image: url('/img/恭喜中獎.png');
+  border: none;
+  background-color: transparent;
+  padding-top: 60px;
+  /* Adjust for header space in image if any */
+}
+
+.modal-payment {
+  background-image: url('/img/等待支付.png');
+  border: none;
+  background-color: transparent;
+  padding-top: 60px;
+}
+
+.modal-secure {
+  background-image: url('/img/重製獎池.png');
+  border: none;
+  background-color: transparent;
+}
+
+.modal-content-backdrop {
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(10px);
+  padding: 25px;
+  border-radius: var(--radius-m);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .modal-wrapper.big-modal {
   width: 700px;
 }
 
-.modal-wrapper h3 {
+.modal-wrapper h3,
+.side-modal-wrapper h3 {
   text-align: center;
   margin-bottom: 25px;
   color: var(--primary);
   font-size: 1.5rem;
   border-bottom: 2px solid rgba(255, 255, 255, 0.1);
   padding-bottom: 15px;
+}
+
+/* Uniform Sidebar Buttons */
+.btn-uniform {
+  height: 54px;
+  /* Fixed height for consistency */
+  margin-bottom: 10px;
+  color: black;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon-small {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon-small:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border-color: white;
 }
 
 .input-group label {
@@ -704,9 +833,164 @@ dialog {
   transition: all 0.2s;
 }
 
-.btn-clear:hover {
-  background: var(--danger);
+/* === L.leaderboard-sidebar {
+  position: absolute;
+  left: 0;
+  top: 100px;
+  bottom: 100px;
+  width: 280px;
+  background: rgba(0, 0, 0, 0.8);
+  border-right: 2px solid var(--accent);
+  border-top-right-radius: 20px;
+  border-bottom-right-radius: 20px;
+  padding: 20px;
+  overflow-y: auto;
   color: white;
-  box-shadow: 0 4px 10px rgba(255, 118, 117, 0.4);
-  transform: translateY(-2px);
+  z-index: 10;
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+} */
+
+.energy-meter-container {
+  background: rgba(0, 0, 0, 0.5);
+  padding: 15px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.energy-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.energy-icon {
+  color: #ffeb3b;
+  margin-right: 5px;
+}
+
+.energy-value {
+  color: #00ff88;
+  font-family: 'Courier New', monospace;
+  font-size: 1.1rem;
+}
+
+.energy-bar-track {
+  width: 100%;
+  height: 12px;
+  background: #333;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.energy-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffeb3b, #ff9800, #ff5722);
+  width: 0%;
+  transition: width 0.5s ease-out;
+  box-shadow: 0 0 10px #ff9800;
+}
+
+.energy-subtext {
+  text-align: right;
+  font-size: 0.75rem;
+  color: #888;
+  margin-top: 5px;
+}
+
+/* === Leaderboard Sidebar === */
+.leaderboard-sidebar {
+  width: 300px;
+  background: url('/img/左側.png') no-repeat center center/cover;
+  border-right: none;
+  display: flex;
+  flex-direction: column;
+  padding: 25px;
+  box-shadow: 5px 0 20px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+}
+
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  flex: 1;
+  background: rgba(0, 0, 0, 0.4);
+  /* Backdrop for entire list */
+  padding: 15px;
+  border-radius: var(--radius-m);
+  backdrop-filter: blur(5px);
+}
+
+.leaderboard-item {
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: var(--radius-s);
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-left: 4px solid #fff;
+  transition: transform 0.2s;
+}
+
+.leaderboard-item:hover {
+  transform: translateX(5px);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.leaderboard-item.rank-1 {
+  border-color: #ffd700;
+  background: linear-gradient(90deg, rgba(255, 215, 0, 0.1), transparent);
+}
+
+.leaderboard-item.rank-2 {
+  border-color: #c0c0c0;
+}
+
+.leaderboard-item.rank-3 {
+  border-color: #cd7f32;
+}
+
+.rank-num {
+  font-weight: 900;
+  width: 25px;
+  color: var(--text-dim);
+}
+
+.rank-1 .rank-num {
+  color: #ffd700;
+  font-size: 1.2rem;
+}
+
+.rank-2 .rank-num {
+  color: #c0c0c0;
+  font-size: 1.1rem;
+}
+
+.rank-3 .rank-num {
+  color: #cd7f32;
+  font-size: 1.1rem;
+}
+
+.lb-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.lb-name {
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.lb-val {
+  color: var(--success);
+  font-weight: 900;
 }

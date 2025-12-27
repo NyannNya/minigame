@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
-import { RefreshCw, Trash2, Plus, ExternalLink, Settings, Copy, Edit2, ShieldCheck } from 'lucide-react';
+import { Settings, RefreshCw, Plus, Upload, User, Trash2, Copy, Edit2, ShieldCheck, ExternalLink } from 'lucide-react';
+import LeaderboardSidebar from './LeaderboardSidebar';
 import '../index.css';
 
 const CONFIG = {
@@ -8,6 +9,22 @@ const CONFIG = {
     NESO: '0x07e49ad54fcd23f6e7b911c2068f0148d1827c08',
     SCAN_BLOCKS: 100000
 };
+
+const CUSTOM_AVATARS = {
+    // User's specific wallet mapping (Normalized to lowercase)
+    '0x1a9378e653edb44b07c0e02ea0819e4a803f49e9': "https://market-static.msu.io/msu/platform/charimages/transient/MWEwYTI1MjQ5Mjk5YTE3MDI0ODVhMTM4MjI1OWE0NzY0NGExMDAzOTQ1YTEwMTIzNzlhMTAyMjI5MmExMDMyMjQxYTEwNTE0MzlhMTA2MjE2NmExMDcxMDc4YTEwODI1NjVhMTEwMjQyMGExMzUyMjQzYTIyMmEwYTZhOWEwYTJhMGExYTBhMGEwYTBhMGEwYTBhMGEwYTA=.png"
+};
+
+const AVATAR_LIST = [
+    "https://api.dicebear.com/7.x/adventurer/svg?seed=Felix",
+    "https://api.dicebear.com/7.x/adventurer/svg?seed=Aneka",
+    "https://api.dicebear.com/7.x/adventurer/svg?seed=Scooter",
+    "https://api.dicebear.com/7.x/adventurer/svg?seed=Precious",
+    "https://api.dicebear.com/7.x/adventurer/svg?seed=Shadow",
+    "https://api.dicebear.com/7.x/adventurer/svg?seed=Jack",
+    "https://api.dicebear.com/7.x/adventurer/svg?seed=Misty",
+    "https://api.dicebear.com/7.x/adventurer/svg?seed=George"
+];
 
 const StreamerGame = () => {
     // Game State
@@ -30,12 +47,19 @@ const StreamerGame = () => {
     // Inputs
     const [modalAddress, setModalAddress] = useState('');
     const [modalNickname, setModalNickname] = useState('');
+    const [modalAvatar, setModalAvatar] = useState('');
     const [modalAmount, setModalAmount] = useState(10000);
     const [replayAmount, setReplayAmount] = useState(0);
 
     // Address Book State
     const [nicknameMap, setNicknameMap] = useState(() => {
         const saved = localStorage.getItem('nicknameMap');
+        return saved ? JSON.parse(saved) : {};
+    });
+
+    // Leaderboard State
+    const [leaderboard, setLeaderboard] = useState(() => {
+        const saved = localStorage.getItem('leaderboardData');
         return saved ? JSON.parse(saved) : {};
     });
 
@@ -55,6 +79,10 @@ const StreamerGame = () => {
         localStorage.setItem('nicknameMap', JSON.stringify(nicknameMap));
     }, [nicknameMap]);
 
+    useEffect(() => {
+        localStorage.setItem('leaderboardData', JSON.stringify(leaderboard));
+    }, [leaderboard]);
+
     // Manual Refresh only - Auto logic removed
 
 
@@ -72,10 +100,14 @@ const StreamerGame = () => {
 
     const getShortAddr = (addr) => addr ? `${addr.substring(0, 6)}...${addr.substring(38)}` : '';
 
-    const copyToClipboard = (text) => {
-        navigator.clipboard.writeText(text);
-        // Maybe a toast? For now just silent or console
-        console.log("Copied", text);
+    const copyToClipboard = async (text) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            alert(`已複製: ${text}`);
+        } catch (e) {
+            console.error("Copy failed", e);
+            alert("複製失敗");
+        }
     };
 
     // --- Game Logic ---
@@ -91,12 +123,14 @@ const StreamerGame = () => {
         setQueue([...queue, {
             from: modalAddress,
             nickname: modalNickname,
+            avatar: modalAvatar, // Store custom avatar
             amount: modalAmount,
             timestamp: new Date().toLocaleTimeString()
         }]);
         setShowAddModal(false);
         setModalAddress('');
         setModalNickname('');
+        setModalAvatar('');
     };
 
     const handleEditNickname = (index) => {
@@ -116,6 +150,20 @@ const StreamerGame = () => {
         }
     };
 
+    const handleEditCurrentPlayer = () => {
+        if (!currentPlayer) return;
+        const targetAddress = currentPlayer.from;
+        const oldName = currentPlayer.nickname || getNickname(targetAddress);
+        const newName = prompt(`修改 ${getShortAddr(targetAddress)} 的暱稱:`, oldName);
+
+        if (newName !== null) {
+            // Update map logic (Global persistence)
+            setNicknameMap(prev => ({ ...prev, [targetAddress]: newName }));
+            // Update Current Player State directly
+            setCurrentPlayer(prev => ({ ...prev, nickname: newName }));
+        }
+    };
+
     const startRound = (index) => {
         if (gameState !== 'IDLE') return alert("遊戲進行中");
 
@@ -130,6 +178,7 @@ const StreamerGame = () => {
         setCards({ c1: null, c2: null, c3: null });
         setFinalPayout(0);
         setHighLowOdds({ high: 0, low: 0 }); // Reset HL Odds
+        setHasRaised(false); // Reset Raise state
         dealCards();
     };
 
@@ -150,8 +199,21 @@ const StreamerGame = () => {
 
     const calculateOdds = (c1, c2) => {
         const gap = Math.abs(c1 - c2) - 1;
-        let odds = 0;
+        let odds = 1.0; // Default to 1.0 for display even if impossible
         let hlOdds = { high: 0, low: 0 };
+
+        // 2. Dynamic Cap & Bonus (Based on Pool reaching 2M - Looser Threshold)
+        // Bonus scales from 1.0 (0%) to 5.0 (400%)
+        let dynamicCap = 20.0;
+        let POOL_BONUS = 1.0;
+        const targetPool = 2000000; // 2 Million (Lower threshold)
+
+        if (poolAmount > 0) {
+            const scale = Math.min(poolAmount, targetPool) / targetPool;
+            dynamicCap = 20.0 + (scale * 80.0);
+            POOL_BONUS = 1.0 + (scale * 4.0);
+        }
+        if (dynamicCap > 100.0) dynamicCap = 100.0;
 
         // 1. Base Odds Calculation
         if (c1 === c2) {
@@ -159,30 +221,24 @@ const StreamerGame = () => {
             const highCount = 13 - c1;
             const lowCount = c1 - 1;
 
-            if (highCount > 0) hlOdds.high = Math.floor((13.0 / highCount) * 0.98 * 100) / 100;
-            if (lowCount > 0) hlOdds.low = Math.floor((13.0 / lowCount) * 0.98 * 100) / 100;
+            if (highCount > 0) hlOdds.high = Math.floor((13.0 / highCount) * 0.85 * POOL_BONUS * 100) / 100;
+            if (lowCount > 0) hlOdds.low = Math.floor((13.0 / lowCount) * 0.85 * POOL_BONUS * 100) / 100;
         } else if (gap > 0) {
-            let fairOdds = 13.0 / gap;
-            odds = fairOdds * 0.98; // Adjusted to 2% House Edge
+            // Power Law: 13 / Gap^1.5 (Smoother Curve)
+            let fairOdds = 13.0 / Math.pow(gap, 1.5);
+            odds = fairOdds * 0.85 * POOL_BONUS;
         }
-
-        // 2. Dynamic Cap (20x -> 100x based on Pool reaching 10M)
-        let dynamicCap = 20.0;
-        const targetPool = 10000000; // 10 Million
-
-        if (poolAmount > 0) {
-            // Linear scale: at 0 pool => 20x. At 10m pool => 100x.
-            // Formula: 20 + (Pool / 10m) * 80
-            const scale = Math.min(poolAmount, targetPool) / targetPool;
-            dynamicCap = 20.0 + (scale * 80.0);
-        }
-        if (dynamicCap > 100.0) dynamicCap = 100.0;
 
         // 3. Bankruptcy Protection (Cannot payout more than pool)
         // Max Payout = Pool Amount. Therefore Max Odds = Pool / Bet
         let bankruptcyCap = 9999.0;
         if (currentPlayer && currentPlayer.amount > 0) {
-            bankruptcyCap = poolAmount / currentPlayer.amount;
+            // Using max(0, pool) prevents negative odds, but we also want to respect the user's wish for "At least > 2x"
+            // If pool is negative, we might arguably just relax the cap for display or set a minimum floor.
+            // Based on request "At least > 2x", we will enforce the floor AT THE END, overriding the cap if necessary.
+            // But let's keep the cap calculation sane (non-negative).
+            const effectivePool = Math.max(poolAmount, 0);
+            bankruptcyCap = effectivePool / currentPlayer.amount;
         }
 
         // Apply Caps to Standard Odds
@@ -190,13 +246,17 @@ const StreamerGame = () => {
             if (odds > dynamicCap) odds = dynamicCap;
             if (odds > bankruptcyCap) odds = bankruptcyCap;
 
-            if (odds > 0 && odds < 1.1) odds = 1.1; // Minimum floor
+            if (odds < 2.0) odds = 2.0; // Minimum floor 2.0x (Prioritize this over bankruptcy cap if needed to avoid -1x or 0x display issues per user request)
         }
 
         // Apply Caps to High/Low Odds
         // HL odds also limited by dynamic cap and bankruptcy
         if (hlOdds.high > dynamicCap) hlOdds.high = dynamicCap;
         if (hlOdds.high > bankruptcyCap) hlOdds.high = bankruptcyCap;
+
+        if (hlOdds.high > 0 && hlOdds.high < 2.0) hlOdds.high = 2.0;
+        if (hlOdds.low > 0 && hlOdds.low < 2.0) hlOdds.low = 2.0;
+
 
         if (hlOdds.low > dynamicCap) hlOdds.low = dynamicCap;
         if (hlOdds.low > bankruptcyCap) hlOdds.low = bankruptcyCap;
@@ -206,6 +266,16 @@ const StreamerGame = () => {
             high: Math.floor(hlOdds.high * 100) / 100,
             low: Math.floor(hlOdds.low * 100) / 100
         });
+    };
+
+    // Wrapper functions for UI consistency
+    const handleGuess = (choice) => {
+        revealCard3(choice);
+    };
+
+    const handleDecision = (action) => {
+        if (action === 'hit') revealCard3();
+        else if (action === 'giveup') handleGiveUp();
     };
 
     const handleGiveUp = () => {
@@ -290,6 +360,34 @@ const StreamerGame = () => {
         setFinalPayout(result === 'WIN' ? payout : paymentRequired); // Store payment amt if lost
         setGameState('END');
 
+        // Update Leaderboard (Win Rate + Payout)
+        const playerAddr = currentPlayer.from;
+        setLeaderboard(prev => {
+            let entry = prev[playerAddr];
+
+            // Migration check: if entry is number (legacy), convert to object
+            if (typeof entry === 'number') {
+                entry = { payout: entry, wins: 0, rounds: 0 };
+            }
+            // If undefined, init
+            if (!entry) {
+                entry = { payout: 0, wins: 0, rounds: 0 };
+            }
+
+            const newRounds = entry.rounds + 1;
+            const newWins = (result === 'WIN') ? entry.wins + 1 : entry.wins;
+            const newPayout = (result === 'WIN') ? entry.payout + payout : entry.payout;
+
+            return {
+                ...prev,
+                [playerAddr]: {
+                    payout: newPayout,
+                    wins: newWins,
+                    rounds: newRounds
+                }
+            };
+        });
+
         if (result === 'WIN') {
             setShowPayoutModal(true);
         } else if (result === 'LOSE_2X' || result === 'LOSE_3X') {
@@ -302,7 +400,7 @@ const StreamerGame = () => {
         setCurrentPlayer(null);
         setCards({ c1: null, c2: null, c3: null });
         setGameMessage('等待開始');
-        setCurrentOdds(0);
+        setCurrentOdds(1.0);
     };
 
     const replayRound = () => {
@@ -312,7 +410,7 @@ const StreamerGame = () => {
         const newPlayer = { ...currentPlayer, amount: replayAmount, timestamp: new Date().toLocaleTimeString() };
         setCurrentPlayer(newPlayer);
         setGameState('PLAYING');
-        setGameMessage("遊戲開始 (重玩)");
+        setGameMessage("遊戲開始");
         dealCards();
         setShowReplayModal(false);
     };
@@ -332,17 +430,32 @@ const StreamerGame = () => {
             const filter = contract.filters.Transfer(null, importWallet);
             const logs = await contract.queryFilter(filter, fromBlock, currentBlock);
 
-            const processed = logs.reverse().map(log => {
-                const parsed = contract.interface.parseLog(log);
-                return {
-                    hash: log.transactionHash,
-                    from: parsed.args.from,
-                    val: ethers.utils.formatEther(parsed.args.value),
-                };
-            }).filter(tx => parseFloat(tx.val) >= 1);
+            setScanStatus(`驗證交易類型 (Method ID)...`);
+
+            const processed = [];
+            // Retrieve latest logs first
+            const reversedLogs = logs.reverse();
+
+            // Check each log's transaction data
+            for (const log of reversedLogs) {
+                const tx = await provider.getTransaction(log.transactionHash);
+                // 0xa9059cbb is the method ID for transfer(address,uint256)
+                if (tx && tx.data && tx.data.toLowerCase().startsWith('0xa9059cbb')) {
+                    const parsed = contract.interface.parseLog(log);
+                    const val = ethers.utils.formatEther(parsed.args.value);
+
+                    if (parseFloat(val) >= 1) {
+                        processed.push({
+                            hash: log.transactionHash,
+                            from: parsed.args.from,
+                            val: val,
+                        });
+                    }
+                }
+            }
 
             setScanResults(processed);
-            setScanStatus(`找到 ${processed.length} 筆交易`);
+            setScanStatus(`找到 ${processed.length} 筆符合交易`);
         } catch (e) {
             console.error(e);
             setScanStatus("掃描失敗: " + e.message);
@@ -369,31 +482,111 @@ const StreamerGame = () => {
         if (confirm(`確定要將獎池重置為 ${formatNum(basePoolAmount)} 嗎？\n(目前: ${formatNum(poolAmount)})`)) {
             const profit = poolAmount - basePoolAmount;
             if (profit > 0) {
-                alert(`已獲利了結: ${formatNum(profit)} NESO`);
+                alert(`已結算: ${formatNum(profit)} NESO`);
             }
             setPoolAmount(basePoolAmount);
+            setLeaderboard({}); // Reset Leaderboard
         }
         setShowSecureModal(false);
     };
 
+    const [hasRaised, setHasRaised] = useState(false);
 
+    // ... (useEffect for bonus removed)
+
+    const handleRaise = () => {
+        if (!currentPlayer) return;
+
+        // 1. Calculate Max Bet allowed by Pool (Bankruptcy Protection)
+        // Payout = Bet * Odds. We need Payout <= Pool.
+        // So MaxBet = Pool / Odds.
+        // We use currentOdds. If specific High/Low logic is active, it's safer to use the higher odd or just currentOdds for the general 'Raise' button which appears before choice? 
+        // Actually 'Raise' appears when c1 != c2. If c1==c2, buttons are High/Low. Raise is for Dragon Gate.
+
+        let safeMax = Infinity;
+        if (currentOdds > 0) {
+            safeMax = Math.floor(poolAmount / currentOdds);
+        }
+
+        // 2. Desired Logic: Double the bet, but max 1,000,000, and max safeMax
+        const targetAmount = currentPlayer.amount * 2;
+        const ABSOLUTE_MAX = 1000000;
+
+        // Final amount is minimum of all constraints
+        const newAmount = Math.min(targetAmount, ABSOLUTE_MAX, safeMax);
+
+        if (newAmount <= currentPlayer.amount) {
+            return alert(`無法加註: 獎池餘額不足以支付賠付 (最大可下: ${formatNum(safeMax)})`);
+        }
+
+        setCurrentPlayer(prev => ({ ...prev, amount: newAmount }));
+        setHasRaised(true);
+        // Optional: Sound effect here
+    };
 
     return (
         <div className="app-container">
+            {/* Left Sidebar: Leaderboard */}
+            <LeaderboardSidebar leaderboard={leaderboard} nicknameMap={nicknameMap} />
+
+
             <main className="game-stage">
-                <div className="pool-display" style={{
-                    marginBottom: 20,
-                    background: 'rgba(0,0,0,0.6)',
-                    padding: '10px 30px',
-                    borderRadius: 20,
-                    border: '2px solid var(--primary)',
-                    textAlign: 'center',
-                    alignSelf: 'center'
+                {/* Header Section: Pool + Challenger */}
+                <div className="game-header" style={{
+                    display: 'flex',
+                    width: '100%',
+                    justifyContent: 'flex-start',
+                    alignItems: 'center',
+                    padding: '20px 80px',
+                    gap: '40px'
                 }}>
-                    <div style={{ fontSize: '0.9rem', color: '#ccc', letterSpacing: 1 }}>🏆 累積獎池 </div>
-                    <div style={{ fontSize: '2.5rem', fontWeight: '900', color: 'var(--primary)', textShadow: '0 0 10px rgba(108, 92, 231, 0.5)' }}>
-                        {formatNum(poolAmount)}
+                    <div className="pool-display" style={{
+                        background: 'rgba(0,0,0,0.6)',
+                        padding: '10px 30px',
+                        borderRadius: 20,
+                        border: '2px solid var(--primary)',
+                        textAlign: 'center'
+                    }}>
+                        <div style={{ fontSize: '0.9rem', color: '#ccc', letterSpacing: 1 }}>🏆 累積獎池 </div>
+                        <div style={{ fontSize: '2.5rem', fontWeight: '900', color: 'var(--primary)', textShadow: '0 0 10px rgba(108, 92, 231, 0.5)' }}>
+                            {formatNum(poolAmount)}
+                        </div>
                     </div>
+
+                    {currentPlayer && (
+                        <div className="current-player">
+                            <div className="player-avatar" style={{ background: '#2f3640', overflow: 'hidden', padding: 0, border: '2px solid #fff' }}>
+                                <img
+                                    src={currentPlayer.avatar || CUSTOM_AVATARS[currentPlayer.from.toLowerCase()] || AVATAR_LIST[parseInt(currentPlayer.from.slice(2, 4), 16) % AVATAR_LIST.length]}
+                                    alt="Avatar"
+                                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                                />
+                            </div>
+                            <div className="player-details">
+                                <div className="player-label">挑戰者</div>
+                                <div className="player-address">
+                                    {formatAddr(currentPlayer)}
+                                    <div style={{ display: 'flex', gap: 5, marginTop: 5 }}>
+                                        <button className="btn-icon-small" onClick={() => copyToClipboard(currentPlayer.from)} title="複製地址">
+                                            <Copy size={12} />
+                                        </button>
+                                        <button className="btn-icon-small" onClick={handleEditCurrentPlayer} title="修改暱稱">
+                                            <Edit2 size={12} />
+                                        </button>
+                                    </div>
+                                    <div style={{
+                                        marginTop: 8,
+                                        fontSize: '1.4rem',
+                                        fontWeight: '900',
+                                        color: 'var(--accent)',
+                                        textShadow: '0 0 10px rgba(255, 234, 167, 0.5)'
+                                    }}>
+                                        {formatNum(currentPlayer.amount)} NESO
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="Table">
@@ -417,19 +610,7 @@ const StreamerGame = () => {
                         <div className="game-status">{gameMessage}</div>
                     </div>
 
-                    {currentPlayer && (
-                        <div className="current-player">
-                            <div className="player-avatar">😎</div>
-                            <div className="player-details">
-                                <div className="player-label">當前挑戰者</div>
-                                <div className="player-address">{formatAddr(currentPlayer)}</div>
-                                <div className="player-bet">
-                                    <span className="label">下注: </span>
-                                    <span className="amount">{formatNum(currentPlayer.amount)}</span>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+
                 </div>
 
                 <div className="controls-overlay">
@@ -441,7 +622,7 @@ const StreamerGame = () => {
                                     onClick={() => revealCard3('low')}
                                     disabled={highLowOdds.low === 0}
                                 >
-                                    ⬇️ 押小
+                                    押小
                                     <span style={{ fontSize: '0.9rem', color: '#2d3436' }}>(1:{highLowOdds.low})</span>
                                 </button>
                                 <button className="btn-action giant-btn"
@@ -449,42 +630,63 @@ const StreamerGame = () => {
                                     onClick={() => revealCard3('high')}
                                     disabled={highLowOdds.high === 0}
                                 >
-                                    ⬆️ 押大
+                                    押大
                                     <span style={{ fontSize: '0.9rem', color: 'white' }}>(1:{highLowOdds.high})</span>
                                 </button>
                             </div>
                         ) : (
                             <div style={{ display: 'flex', gap: 15 }}>
                                 <button className="btn-action giant-btn" onClick={() => handleGiveUp()} style={{ background: '#636e72', fontSize: '1rem', minWidth: 100, whiteSpace: 'nowrap' }}>
-                                    🏳️ 放棄
+                                    放棄
                                 </button>
-                                <button className="btn-action giant-btn" onClick={() => revealCard3()} style={{ whiteSpace: 'nowrap' }}>🔥 射門!</button>
+
+                                {/* Allow multiple raises until limit */}
+                                <button
+                                    className="btn-action giant-btn"
+                                    onClick={handleRaise}
+                                    style={{
+                                        background: 'linear-gradient(135deg, #FFD700 0%, #FF8C00 100%)',
+                                        color: '#000',
+                                        fontSize: '1rem',
+                                        minWidth: 120,
+                                        fontWeight: 'bold',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    加碼 (+{(() => {
+                                        const ABSOLUTE_MAX = 1000000;
+                                        const original = currentPlayer?.amount || 0;
+                                        const target = original * 2;
+                                        const safeMax = Math.floor(poolAmount / currentOdds);
+                                        const capped = Math.min(target, ABSOLUTE_MAX, safeMax);
+                                        const diff = capped - original;
+                                        return formatNum(diff > 0 ? diff : 0);
+                                    })()})
+                                </button>
+
+                                <button className="btn-action giant-btn" onClick={() => revealCard3()} style={{ whiteSpace: 'nowrap' }}>射門!</button>
                             </div>
                         )
                     )}
 
                     {gameState === 'END' && (
                         <div className="result-actions" style={{ display: 'flex', gap: 10 }}>
-                            <button className="btn-replay" onClick={() => { setReplayAmount(currentPlayer.amount); setShowReplayModal(true); }}>🔄 再來一局</button>
-                            <button className="btn-next" onClick={nextRound}>下一局 ⏭️</button>
+                            <button className="btn-replay" onClick={() => { setReplayAmount(currentPlayer.amount); setShowReplayModal(true); }}>再來一局</button>
+                            <button className="btn-next" onClick={nextRound}>下一局</button>
                         </div>
                     )}
                 </div>
             </main>
 
             <aside className="dashboard-sidebar">
-                <div className="sidebar-header">
-                    <h2>🎛️ 控制面板</h2>
-                </div>
-
                 <div className="panel-card action-section">
-                    <button className="btn-primary-pop" onClick={() => setShowAddModal(true)} style={{ marginBottom: 10 }}>
+                    <button className="btn-primary-pop btn-uniform" onClick={() => setShowAddModal(true)}>
                         <Plus size={18} /> 新增挑戰者
                     </button>
-                    <button className="btn-secondary-pop" onClick={() => setShowImportModal(true)} style={{ marginBottom: 10 }}>
+                    <button className="btn-secondary-pop btn-uniform" onClick={() => setShowImportModal(true)}>
                         <RefreshCw size={18} /> 匯入鏈上數據
                     </button>
-                    <button className="btn-action-small" onClick={() => setShowSecureModal(true)} style={{ width: '100%', background: 'var(--success)', border: 'none' }}>
+                    <button className="btn-action-small btn-uniform" onClick={() => setShowSecureModal(true)} style={{ width: '100%', background: 'var(--success)', border: 'none' }}>
                         <ShieldCheck size={18} /> 重置獎池
                     </button>
                 </div>
@@ -536,23 +738,29 @@ const StreamerGame = () => {
             {/* Modals */}
             {showAddModal && (
                 <dialog className="cyber-modal" open>
-                    <div className="modal-wrapper">
-                        <h3>新增挑戰者</h3>
-                        <div className="input-group">
-                            <label>錢包地址</label>
-                            <input value={modalAddress} onChange={e => setModalAddress(e.target.value)} placeholder="0x..." />
-                        </div>
-                        <div className="input-group" style={{ marginTop: 10 }}>
-                            <label>暱稱 (選填)</label>
-                            <input value={modalNickname} onChange={e => setModalNickname(e.target.value)} placeholder="GodTone" />
-                        </div>
-                        <div className="input-group" style={{ marginTop: 10 }}>
-                            <label>金額</label>
-                            <input type="number" value={modalAmount} onChange={e => setModalAmount(parseFloat(e.target.value))} />
-                        </div>
-                        <div className="modal-footer">
-                            <button className="btn-cancel" onClick={() => setShowAddModal(false)}>取消</button>
-                            <button className="btn-confirm" onClick={manualAddPlayer}>確認</button>
+                    <div className="modal-wrapper modal-add">
+                        <div className="modal-content-backdrop">
+                            <h3>新增挑戰者</h3>
+                            <div className="input-group">
+                                <label>錢包地址</label>
+                                <input value={modalAddress} onChange={e => setModalAddress(e.target.value)} placeholder="0x..." />
+                            </div>
+                            <div className="input-group" style={{ marginTop: 10 }}>
+                                <label>暱稱 (選填)</label>
+                                <input value={modalNickname} onChange={e => setModalNickname(e.target.value)} placeholder="GodTone" />
+                            </div>
+                            <div className="input-group" style={{ marginTop: 10 }}>
+                                <label>頭像 URL (選填)</label>
+                                <input value={modalAvatar} onChange={e => setModalAvatar(e.target.value)} placeholder="https://..." />
+                            </div>
+                            <div className="input-group" style={{ marginTop: 10 }}>
+                                <label>金額</label>
+                                <input type="number" value={modalAmount} onChange={e => setModalAmount(parseFloat(e.target.value))} />
+                            </div>
+                            <div className="modal-footer">
+                                <button className="btn-cancel" onClick={() => setShowAddModal(false)}>取消</button>
+                                <button className="btn-confirm" onClick={manualAddPlayer}>確認</button>
+                            </div>
                         </div>
                     </div>
                 </dialog>
@@ -560,41 +768,43 @@ const StreamerGame = () => {
 
             {showImportModal && (
                 <dialog className="cyber-modal" open>
-                    <div className="modal-wrapper big-modal">
-                        <h3>🔗 鏈上匯入</h3>
-                        <div className="input-group">
-                            <label>錢包地址 (Host)</label>
-                            <input value={importWallet} onChange={e => { setImportWallet(e.target.value); localStorage.setItem('hostWallet', e.target.value); }} />
-                        </div>
-                        <div className="scan-controls" style={{ marginTop: 10 }}>
-                            <button className="btn-action-small" onClick={scanChain}>{scanStatus.includes('掃描') ? '...' : '🔍 掃描'}</button>
-                            <span className="status-text">{scanStatus}</span>
-                        </div>
-                        <div className="scan-results">
-                            <table className="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>選取</th>
-                                        <th>地址</th>
-                                        <th>金額</th>
-                                        <th>Tx</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {scanResults.map((tx) => (
-                                        <tr key={tx.hash}>
-                                            <td><input type="checkbox" className="import-chk" checked={!!selectedTx[tx.hash]} onChange={() => setSelectedTx(p => ({ ...p, [tx.hash]: !p[tx.hash] }))} /></td>
-                                            <td className="addr-col" title={tx.from}>{getShortAddr(tx.from)} <span style={{ color: 'var(--accent)', fontSize: '0.8em' }}>{getNickname(tx.from)}</span></td>
-                                            <td style={{ color: 'var(--success)', fontWeight: 'bold' }}>{formatNum(tx.val)}</td>
-                                            <td><a href={`https://subnets.avax.network/henesys/tx/${tx.hash}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /></a></td>
+                    <div className="modal-wrapper big-modal modal-import">
+                        <div className="modal-content-backdrop">
+                            <h3>🔗 鏈上匯入</h3>
+                            <div className="input-group">
+                                <label>錢包地址 (Host)</label>
+                                <input value={importWallet} onChange={e => { setImportWallet(e.target.value); localStorage.setItem('hostWallet', e.target.value); }} />
+                            </div>
+                            <div className="scan-controls" style={{ marginTop: 10 }}>
+                                <button className="btn-action-small" onClick={scanChain}>{scanStatus.includes('掃描') ? '...' : '🔍 掃描'}</button>
+                                <span className="status-text">{scanStatus}</span>
+                            </div>
+                            <div className="scan-results">
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>選取</th>
+                                            <th>地址</th>
+                                            <th>金額</th>
+                                            <th>Tx</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        <div className="modal-footer">
-                            <button className="btn-cancel" onClick={() => setShowImportModal(false)}>取消</button>
-                            <button className="btn-confirm" onClick={importSelected}>匯入</button>
+                                    </thead>
+                                    <tbody>
+                                        {scanResults.map((tx) => (
+                                            <tr key={tx.hash}>
+                                                <td><input type="checkbox" className="import-chk" checked={!!selectedTx[tx.hash]} onChange={() => setSelectedTx(p => ({ ...p, [tx.hash]: !p[tx.hash] }))} /></td>
+                                                <td className="addr-col" title={tx.from}>{getShortAddr(tx.from)} <span style={{ color: 'var(--accent)', fontSize: '0.8em' }}>{getNickname(tx.from)}</span></td>
+                                                <td style={{ color: 'var(--success)', fontWeight: 'bold' }}>{formatNum(tx.val)}</td>
+                                                <td><a href={`https://subnets.avax.network/henesys/tx/${tx.hash}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /></a></td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="modal-footer">
+                                <button className="btn-cancel" onClick={() => setShowImportModal(false)}>取消</button>
+                                <button className="btn-confirm" onClick={importSelected}>匯入</button>
+                            </div>
                         </div>
                     </div>
                 </dialog>
@@ -602,90 +812,113 @@ const StreamerGame = () => {
 
             {showReplayModal && (
                 <dialog className="cyber-modal" open>
-                    <div className="modal-wrapper">
-                        <h3>🔄 再來一局</h3>
-                        <p style={{ marginBottom: 15 }}>玩家: <span style={{ color: 'var(--primary)' }}>{formatAddr(currentPlayer)}</span></p>
-                        <div className="input-group">
-                            <label>下注金額</label>
-                            <input type="number" value={replayAmount} onChange={e => setReplayAmount(parseFloat(e.target.value))} />
-                        </div>
-                        <div className="modal-footer">
-                            <button className="btn-cancel" onClick={() => setShowReplayModal(false)}>取消</button>
-                            <button className="btn-confirm" onClick={replayRound}>確認</button>
+                    <div className="modal-wrapper modal-replay">
+                        <div className="modal-content-backdrop">
+                            <h3>🔄 再來一局</h3>
+                            <p style={{ marginBottom: 15 }}>玩家: <span style={{ color: 'var(--primary)' }}>{formatAddr(currentPlayer)}</span></p>
+                            <div className="input-group">
+                                <label>下注金額</label>
+                                <input type="number" value={replayAmount} onChange={e => setReplayAmount(parseFloat(e.target.value))} />
+                            </div>
+                            <div className="modal-footer">
+                                <button className="btn-cancel" onClick={() => setShowReplayModal(false)}>取消</button>
+                                <button className="btn-confirm" onClick={replayRound}>確認</button>
+                            </div>
                         </div>
                     </div>
                 </dialog>
             )}
 
             {showPayoutModal && (
-                <dialog className="cyber-modal" open>
-                    <div className="modal-wrapper">
-                        <h3>🎉 恭喜 {currentPlayer?.nickname || '玩家'}!</h3>
-                        <div style={{ background: 'rgba(0,0,0,0.3)', padding: 15, borderRadius: 15, marginBottom: 20 }}>
-                            <div>中獎者: <span style={{ fontFamily: 'monospace', color: 'var(--success)' }}>{currentPlayer?.nickname || getShortAddr(currentPlayer?.from)}</span></div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: '900', color: 'var(--primary)', marginTop: 10 }}>{formatNum(finalPayout)} NESO</div>
-                        </div>
-                        <button className="btn-confirm large" onClick={() => {
-                            const text = `🏆 恭喜 ${currentPlayer?.nickname || currentPlayer?.from} 贏得 ${formatNum(finalPayout)} NESO!`;
-                            navigator.clipboard.writeText(text);
-                            alert("已複製: " + text);
-                        }}>📋 複製中獎資訊</button>
-                        <div className="modal-footer">
-                            <button className="btn-cancel" onClick={() => setShowPayoutModal(false)}>關閉</button>
+                <dialog className="cyber-modal" open style={{ background: 'transparent' }}>
+                    <div className="side-modal-wrapper modal-payout" style={{ borderColor: 'var(--success)' }}>
+                        <div className="modal-content-backdrop">
+                            <h3>🎉 恭喜 {currentPlayer?.nickname || '玩家'}!</h3>
+                            <div style={{ background: 'rgba(0,0,0,0.3)', padding: 15, borderRadius: 15, marginBottom: 20 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                    <span>中獎者: </span>
+                                    <span style={{ fontFamily: 'monospace', color: 'var(--success)', fontWeight: 'bold' }}>
+                                        {currentPlayer?.nickname || getShortAddr(currentPlayer?.from)}
+                                    </span>
+                                    <button className="btn-icon-small" onClick={() => copyToClipboard(currentPlayer?.from)} title="複製錢包地址">
+                                        <Copy size={12} />
+                                    </button>
+                                </div>
+                                <div style={{ fontSize: '1.5rem', fontWeight: '900', color: 'var(--primary)', marginTop: 10 }}>{formatNum(finalPayout)} NESO</div>
+                            </div>
+                            <div className="modal-footer" style={{ flexDirection: 'column', gap: 10 }}>
+                                <button className="btn-confirm large" style={{ width: '100%' }} onClick={() => {
+                                    const text = `🏆 恭喜 ${currentPlayer?.nickname || currentPlayer?.from} 贏得 ${formatNum(finalPayout)} NESO!`;
+                                    navigator.clipboard.writeText(text);
+                                    alert("已複製: " + text);
+                                }}>📋 複製中獎資訊</button>
+                                <button className="btn-cancel" style={{ width: '100%', flex: 'none' }} onClick={() => setShowPayoutModal(false)}>關閉</button>
+                            </div>
                         </div>
                     </div>
                 </dialog>
             )}
 
             {showPaymentModal && (
-                <dialog className="cyber-modal" open>
-                    <div className="modal-wrapper">
-                        <h3>💸 等待支付</h3>
-                        <div style={{ background: 'rgba(255,118,117,0.1)', padding: 15, borderRadius: 15, marginBottom: 20, border: '2px solid var(--danger)' }}>
-                            <div style={{ color: 'var(--danger)', fontWeight: 'bold', fontSize: '1.2rem', marginBottom: 10 }}>{currentPlayer?.nickname || '玩家'} 輸了!</div>
-                            <div>請收取: <span style={{ fontWeight: '900', color: 'white', fontSize: '1.5rem' }}>{formatNum(finalPayout)} NESO</span></div>
-                            <div style={{ marginTop: 10, fontSize: '0.9rem', color: '#ccc' }}>原因: {gameMessage}</div>
-                        </div>
-                        <div className="modal-footer">
-                            <button className="btn-confirm" onClick={() => setShowPaymentModal(false)}>已確認收款</button>
+                <dialog className="cyber-modal" open style={{ background: 'transparent' }}>
+                    <div className="side-modal-wrapper modal-payment" style={{ borderColor: 'var(--danger)' }}>
+                        <div className="modal-content-backdrop">
+                            <h3>💸 等待支付</h3>
+                            <div style={{ background: 'rgba(255,118,117,0.1)', padding: 15, borderRadius: 15, marginBottom: 20, border: '2px solid var(--danger)' }}>
+                                <div style={{ color: 'var(--danger)', fontWeight: 'bold', fontSize: '1.2rem', marginBottom: 10 }}>{currentPlayer?.nickname || '玩家'} 輸了!</div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                                    <span>下注:</span>
+                                    <span>{formatNum(currentPlayer.amount)}</span>
+                                </div>
+                            </div>
+                            <div className="modal-footer" style={{ flexDirection: 'column', gap: 10 }}>
+                                <button className="btn-primary-pop" style={{ width: '100%', background: 'var(--accent)' }} onClick={() => {
+                                    // In a real app, check allowence
+                                    alert("模擬支付成功!");
+                                    setShowPaymentModal(false);
+                                }}>確認支付</button>
+                                <button className="btn-cancel" style={{ width: '100%', flex: 'none' }} onClick={() => setShowPaymentModal(false)}>暫時跳過</button>
+                            </div>
                         </div>
                     </div>
                 </dialog>
             )}
             {showSecureModal && (
                 <dialog className="cyber-modal" open>
-                    <div className="modal-wrapper">
-                        <h3>🛡️ 獲利 / 重置獎池</h3>
-                        <div style={{ marginBottom: 20 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                                <span>目前累積:</span>
-                                <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontSize: '1.2rem' }}>{formatNum(poolAmount)}</span>
+                    <div className="modal-wrapper modal-secure">
+                        <div className="modal-content-backdrop">
+                            <h3>🛡️ 重置獎池</h3>
+                            <div style={{ marginBottom: 20 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                                    <span>目前累積:</span>
+                                    <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontSize: '1.2rem' }}>{formatNum(poolAmount)}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10, alignItems: 'center' }}>
+                                    <span>重置金額:</span>
+                                    <input
+                                        type="number"
+                                        value={basePoolAmount}
+                                        onChange={e => setBasePoolAmount(Number(e.target.value))}
+                                        style={{ width: 100, padding: 5, borderRadius: 5, background: '#333', border: '1px solid #555', color: 'white', textAlign: 'right' }}
+                                    />
+                                </div>
+                                <hr style={{ borderColor: '#444', margin: '15px 0' }} />
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem' }}>
+                                    <span>清除獎池:</span>
+                                    <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>
+                                        {poolAmount > basePoolAmount ? formatNum(poolAmount - basePoolAmount) : 0}
+                                    </span>
+                                </div>
                             </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10, alignItems: 'center' }}>
-                                <span>重置目標 (保底):</span>
-                                <input
-                                    type="number"
-                                    value={basePoolAmount}
-                                    onChange={e => setBasePoolAmount(Number(e.target.value))}
-                                    style={{ width: 100, padding: 5, borderRadius: 5, background: '#333', border: '1px solid #555', color: 'white' }}
-                                />
+                            <div className="modal-footer">
+                                <button className="btn-cancel" onClick={() => setShowSecureModal(false)}>取消</button>
+                                <button className="btn-confirm" onClick={handleSecureProfits}>確認重置</button>
                             </div>
-                            <hr style={{ borderColor: '#444', margin: '15px 0' }} />
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem' }}>
-                                <span>顯示獲利:</span>
-                                <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>
-                                    {poolAmount > basePoolAmount ? formatNum(poolAmount - basePoolAmount) : 0}
-                                </span>
-                            </div>
-                        </div>
-                        <div className="modal-footer">
-                            <button className="btn-cancel" onClick={() => setShowSecureModal(false)}>取消</button>
-                            <button className="btn-confirm" onClick={handleSecureProfits}>確認重置</button>
                         </div>
                     </div>
-                </dialog>
+                </dialog >
             )}
-        </div>
+        </div >
     );
 };
 
