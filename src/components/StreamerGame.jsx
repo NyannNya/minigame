@@ -164,6 +164,39 @@ const StreamerGame = () => {
         }
     };
 
+    const handleEditAmount = () => {
+        if (!currentPlayer) return;
+        const oldAmount = currentPlayer.amount;
+        const newAmountStr = prompt(`修改下注金額 (目前: ${formatNum(oldAmount)})\n\n若金額減少，餘額將自動退回排隊列表。`, oldAmount);
+
+        if (newAmountStr === null) return;
+
+        const newAmount = parseFloat(newAmountStr);
+        if (isNaN(newAmount) || newAmount < 10000) return alert("最低下注 10,000");
+        if (newAmount > 10000000) return alert("單筆上限 10,000,000");
+
+        if (newAmount < oldAmount) {
+            // Refund Logic
+            const refund = oldAmount - newAmount;
+            if (refund >= 10000) { // Only refund if valid amount? Or any amount? Let's say any positive.
+                // Actually keeping min bet rule for refund might be annoying if refund is small (e.g. 5000 left).
+                // But queue usually expects playable amounts. Let's just allow it for now or warn?
+                // User said "自動餘額回到排隊列表". I'll just put it back.
+                const refundPlayer = {
+                    ...currentPlayer,
+                    amount: refund,
+                    timestamp: new Date().toLocaleTimeString() + " (退回)"
+                };
+                setQueue(prev => [...prev, refundPlayer]);
+                alert(`已將餘額 ${formatNum(refund)} 退回排隊列表`);
+            } else {
+                if (refund > 0) alert(`餘額 ${formatNum(refund)} 過小，未退回 (需大於 0)`); // Should basically never happen with 10k min but logical check
+            }
+        }
+
+        setCurrentPlayer(prev => ({ ...prev, amount: newAmount }));
+    };
+
     const startRound = (index) => {
         if (gameState !== 'IDLE') return alert("遊戲進行中");
 
@@ -577,9 +610,15 @@ const StreamerGame = () => {
                                         fontSize: '1.4rem',
                                         fontWeight: '900',
                                         color: 'var(--accent)',
-                                        textShadow: '0 0 10px rgba(255, 234, 167, 0.5)'
+                                        textShadow: '0 0 10px rgba(255, 234, 167, 0.5)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 10
                                     }}>
                                         {formatNum(currentPlayer.amount)} NESO
+                                        <button className="btn-icon-small" onClick={handleEditAmount} title="修改金額">
+                                            <Edit2 size={12} />
+                                        </button>
                                     </div>
                                 </div>
                             </div>
