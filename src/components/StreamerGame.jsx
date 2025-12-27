@@ -555,10 +555,42 @@ const StreamerGame = () => {
         // Optional: Sound effect here
     };
 
+    const handleReturnToQueue = (addr) => {
+        const entry = leaderboard[addr];
+        if (!entry) return;
+
+        // Handle legacy number format
+        const amount = typeof entry === 'number' ? entry : entry.payout;
+
+        if (amount <= 0) return alert("無獎金可領回");
+
+        if (confirm(`確定將 ${getNickname(addr) || getShortAddr(addr)} 的 ${formatNum(amount)} 獎金移回排隊列表嗎？\n(這將會從排行榜中移除此紀錄)`)) {
+            const newItem = {
+                from: addr,
+                nickname: getNickname(addr),
+                amount: amount, // Use full payout as new bet
+                timestamp: new Date().toLocaleTimeString() + " (領回)"
+            };
+
+            setQueue(prev => [...prev, newItem]);
+
+            // Remove from leaderboard
+            setLeaderboard(prev => {
+                const next = { ...prev };
+                delete next[addr];
+                return next;
+            });
+        }
+    };
+
     return (
         <div className="app-container">
             {/* Left Sidebar: Leaderboard */}
-            <LeaderboardSidebar leaderboard={leaderboard} nicknameMap={nicknameMap} />
+            <LeaderboardSidebar
+                leaderboard={leaderboard}
+                nicknameMap={nicknameMap}
+                onReturnToQueue={handleReturnToQueue}
+            />
 
 
             <main className="game-stage">
