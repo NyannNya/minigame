@@ -1,16 +1,57 @@
-# React + Vite
+# 直播主射龍門小遊戲 (Streamer Dragon Gate)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+這是一個專為直播互動設計的射龍門網頁遊戲，整合了 NESO 鏈上交易監控功能。
 
-Currently, two official plugins are available:
+## 🎮 遊戲特色
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **NESO 鏈上整合**: 可自動掃描並匯入觀眾的匯款交易，自動加入排隊列表。
+- **直播主控制面板**: 完整的手動控制功能（新增、刪除、修改暱稱）。
+- **累積獎池顯示 (Jackpot Display)**: 
+  - 在主視窗正上方即時顯示目前累積的獎池金額，增加直播互動感。
+- **獲利安全鎖 (Manual Security)**: 
+  - 手動「獲利了結」按鈕。
+  - 當獎池累積過多時，直播主可手動點擊按鈕，將超過「保底金額」（預設 100,000）的獲利提領並重置獎池。
+- **自動賠率計算**: 
+  - **優化版 2% 莊家優勢**，提升玩家體驗。
+  - **動態賠率上限**: 
+    - 基礎上限 20x (當獎池較小時)。
+    - **動態成長**: 賠率上限會隨著獎池金額線性成長，當獎池達到 1000 萬時，賠率上限可達 **100x**。
+    - **倒閉保護**: 系統會自動限制單局最高賠率，確保若玩家獲勝，獎池有足夠資金支付，不會破產歸零。
+  - **進球 (Win)**: 獲得賠率獎金。
+  - **放棄 (Fold)**: 玩家看完牌後可選擇「放棄/投降」，下注金將直接**全數進入獎池**。
+  - **撞柱**: 賠付 2 倍。
+  - **三條**: 賠付 3 倍。
+  - **對子 (平手)**: 
+    - 觸發 **比大小** 遊戲。
+    - 玩家可選擇押「大」或「小」，猜中獲得對應賠率，猜錯由莊家取走下注金。
 
-## React Compiler
+## 📜 遊戲規則
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1.  **發牌**: 莊家發出兩張牌 (門柱)。
+2.  **計算賠率**: 
+    - **一般情況**: 根據兩張牌的差距計算賠率。 
+    - **對子 (兩張相同)**: 玩家需選擇 **押大** 或 **押小** 。
+3.  **射門 / 比大小**: 發出第三張牌。
+    - **進球 (Win)**: 第三張牌點數介於兩張門柱之間，獲得賠率獎金。
+    - **撞柱 (Hit)**: 第三張牌點數等於任一門柱，玩家輸掉 2 倍下注金。
+    - **三條 (Triple)**: 三張牌點數相同，玩家輸掉 3 倍下注金。
+    - **射歪 (Miss)**: 第三張牌在門柱之外，玩家輸掉下注金。
 
-## Expanding the ESLint configuration
+## 🛠️ 安裝與執行
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+確保您已安裝 Node.js。
+
+1.  安裝依賴:
+    ```bash
+    npm install
+    ```
+
+2.  啟動遊戲 (開發模式):
+    ```bash
+    npm run dev
+    ```
+
+## 🔒 安全機制說明
+
+- **獎池顯示**: 畫面中央上方會清楚顯示目前的累積獎池 (Jackpot)，讓觀眾隨時看到獎金規模。
+- **獲利了結**: 點擊控制面板的「安全鎖」按鈕 (Shield Icon)，確認後即可將超過保底金額的獲利領出，並將獎池重置。

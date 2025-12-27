@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
-import { RefreshCw, Trash2, Plus, ExternalLink, Settings, Copy, Edit2 } from 'lucide-react';
+import { RefreshCw, Trash2, Plus, ExternalLink, Settings, Copy, Edit2, ShieldCheck } from 'lucide-react';
 import '../index.css';
 
 const CONFIG = {
@@ -45,10 +45,18 @@ const StreamerGame = () => {
     const [scanResults, setScanResults] = useState([]);
     const [selectedTx, setSelectedTx] = useState({});
 
+    // Security & Withdrawal (Manual)
+    const [showSecureModal, setShowSecureModal] = useState(false);
+    const [basePoolAmount, setBasePoolAmount] = useState(100000); // Default 100k as requested
+    const [highLowOdds, setHighLowOdds] = useState({ high: 0, low: 0 });
+
     // --- Effects ---
     useEffect(() => {
         localStorage.setItem('nicknameMap', JSON.stringify(nicknameMap));
     }, [nicknameMap]);
+
+    // Manual Refresh only - Auto logic removed
+
 
     // --- Helpers ---
     const formatNum = (num) => Math.floor(num).toLocaleString();
@@ -74,6 +82,7 @@ const StreamerGame = () => {
     const manualAddPlayer = () => {
         if (!modalAddress) return alert("請輸入錢包地址");
         if (modalAmount < 10000) return alert("最低下注 10,000");
+        if (modalAmount > 100000) return alert("單筆上限 100,000");
 
         if (modalNickname) {
             setNicknameMap(prev => ({ ...prev, [modalAddress]: modalNickname }));
@@ -120,6 +129,7 @@ const StreamerGame = () => {
         setGameMessage("遊戲開始");
         setCards({ c1: null, c2: null, c3: null });
         setFinalPayout(0);
+        setHighLowOdds({ high: 0, low: 0 }); // Reset HL Odds
         dealCards();
     };
 
@@ -136,29 +146,86 @@ const StreamerGame = () => {
         }, 600);
     };
 
+
+
     const calculateOdds = (c1, c2) => {
         const gap = Math.abs(c1 - c2) - 1;
         let odds = 0;
-        if (gap <= 0) {
-            odds = 0;
-        } else {
+        let hlOdds = { high: 0, low: 0 };
+
+        // 1. Base Odds Calculation
+        if (c1 === c2) {
+            // Pair Case: High / Low
+            const highCount = 13 - c1;
+            const lowCount = c1 - 1;
+
+            if (highCount > 0) hlOdds.high = Math.floor((13.0 / highCount) * 0.98 * 100) / 100;
+            if (lowCount > 0) hlOdds.low = Math.floor((13.0 / lowCount) * 0.98 * 100) / 100;
+        } else if (gap > 0) {
             let fairOdds = 13.0 / gap;
-            odds = fairOdds * 0.95; // Standard 5% House Edge
-            if (poolAmount > 200000) odds *= 1.1; // Restore small bonus for large pools
+            odds = fairOdds * 0.98; // Adjusted to 2% House Edge
         }
-        if (odds > 0 && odds < 1.1) odds = 1.1;
+
+        // 2. Dynamic Cap (20x -> 100x based on Pool reaching 10M)
+        let dynamicCap = 20.0;
+        const targetPool = 10000000; // 10 Million
+
+        if (poolAmount > 0) {
+            // Linear scale: at 0 pool => 20x. At 10m pool => 100x.
+            // Formula: 20 + (Pool / 10m) * 80
+            const scale = Math.min(poolAmount, targetPool) / targetPool;
+            dynamicCap = 20.0 + (scale * 80.0);
+        }
+        if (dynamicCap > 100.0) dynamicCap = 100.0;
+
+        // 3. Bankruptcy Protection (Cannot payout more than pool)
+        // Max Payout = Pool Amount. Therefore Max Odds = Pool / Bet
+        let bankruptcyCap = 9999.0;
+        if (currentPlayer && currentPlayer.amount > 0) {
+            bankruptcyCap = poolAmount / currentPlayer.amount;
+        }
+
+        // Apply Caps to Standard Odds
+        if (c1 !== c2) {
+            if (odds > dynamicCap) odds = dynamicCap;
+            if (odds > bankruptcyCap) odds = bankruptcyCap;
+
+            if (odds > 0 && odds < 1.1) odds = 1.1; // Minimum floor
+        }
+
+        // Apply Caps to High/Low Odds
+        // HL odds also limited by dynamic cap and bankruptcy
+        if (hlOdds.high > dynamicCap) hlOdds.high = dynamicCap;
+        if (hlOdds.high > bankruptcyCap) hlOdds.high = bankruptcyCap;
+
+        if (hlOdds.low > dynamicCap) hlOdds.low = dynamicCap;
+        if (hlOdds.low > bankruptcyCap) hlOdds.low = bankruptcyCap;
+
         setCurrentOdds(Math.floor(odds * 100) / 100);
+        setHighLowOdds({
+            high: Math.floor(hlOdds.high * 100) / 100,
+            low: Math.floor(hlOdds.low * 100) / 100
+        });
     };
 
-    const revealCard3 = () => {
+    const handleGiveUp = () => {
+        if (gameState !== 'PLAYING') return;
+        setGameState('END');
+        setGameMessage("玩家放棄 (投降)");
+        setPoolAmount(p => p + currentPlayer.amount); // Bet goes to pool
+        // Show cards just for fun? Or leave hidden. Let's show C3
+        setCards(prev => ({ ...prev, c3: prev.c3_hidden }));
+    };
+
+    const revealCard3 = (choice = null) => {
         if (gameState !== 'PLAYING') return;
         const { c1, c2, c3_hidden } = cards;
         setCards(prev => ({ ...prev, c3: c3_hidden }));
         setGameState('REVEALED');
-        determineWinner(c1, c2, c3_hidden);
+        determineWinner(c1, c2, c3_hidden, choice);
     };
 
-    const determineWinner = (c1, c2, c3) => {
+    const determineWinner = (c1, c2, c3, choice) => {
         const low = Math.min(c1, c2);
         const high = Math.max(c1, c2);
         let result = '';
@@ -166,20 +233,43 @@ const StreamerGame = () => {
         let payout = 0;
         let paymentRequired = 0;
 
-        if (c1 === c2) {
+        if (choice) {
+            // High/Low Mode
+            if (c3 === c1) {
+                result = 'LOSE_3X';
+                message = "三條撞柱! (賠付 3x)";
+                paymentRequired = currentPlayer.amount * 3;
+                setPoolAmount(p => p + paymentRequired);
+            } else if ((choice === 'high' && c3 > c1) || (choice === 'low' && c3 < c1)) {
+                result = 'WIN';
+                const odds = choice === 'high' ? highLowOdds.high : highLowOdds.low;
+                message = `猜中${choice === 'high' ? '大' : '小'}! (贏 ${odds}x)`;
+                payout = Math.floor(currentPlayer.amount * odds);
+                setPoolAmount(p => p - (payout - currentPlayer.amount));
+            } else {
+                result = 'LOSE';
+                message = `猜錯了! (${choice === 'high' ? '開小' : '開大'})`;
+                setPoolAmount(p => p + currentPlayer.amount);
+            }
+        } else if (c1 === c2) {
+            // Should not happen if UI is correct, but fallback
             if (c3 === c1) {
                 result = 'LOSE_3X';
                 message = "三條撞柱! (賠付 3x)";
                 paymentRequired = currentPlayer.amount * 3;
                 setPoolAmount(p => p + paymentRequired);
             } else {
+                // If user didn't choose (legacy path?), treat as push or simple lose?
+                // For now, assume Push if no choice made (but UI should force choice)
                 result = 'PUSH';
-                message = "對子 (平手)";
+                message = "平手";
             }
         } else {
+            // Standard Dragon Gate Logic
             if (c3 > low && c3 < high) {
+
                 result = 'WIN';
-                message = "進球! (贏!)";
+                message = "進球!";
                 payout = Math.floor(currentPlayer.amount * currentOdds);
                 setPoolAmount(p => p - (payout - currentPlayer.amount));
             } else if (c3 === low || c3 === high) {
@@ -189,7 +279,7 @@ const StreamerGame = () => {
                 setPoolAmount(p => p + paymentRequired);
             } else {
                 result = 'LOSE';
-                message = "射歪了! (輸)";
+                message = "射歪了!";
                 paymentRequired = currentPlayer.amount; // Just the bet
                 setPoolAmount(p => p + paymentRequired);
             }
@@ -217,6 +307,7 @@ const StreamerGame = () => {
 
     const replayRound = () => {
         if (!replayAmount || replayAmount < 10000) return alert("最低下注 10,000");
+        if (replayAmount > 100000) return alert("單筆上限 100,000");
         nextRound();
         const newPlayer = { ...currentPlayer, amount: replayAmount, timestamp: new Date().toLocaleTimeString() };
         setCurrentPlayer(newPlayer);
@@ -273,10 +364,40 @@ const StreamerGame = () => {
         setSelectedTx({});
     };
 
+    const handleSecureProfits = () => {
+        // Reset Logic
+        if (confirm(`確定要將獎池重置為 ${formatNum(basePoolAmount)} 嗎？\n(目前: ${formatNum(poolAmount)})`)) {
+            const profit = poolAmount - basePoolAmount;
+            if (profit > 0) {
+                alert(`已獲利了結: ${formatNum(profit)} NESO`);
+            }
+            setPoolAmount(basePoolAmount);
+        }
+        setShowSecureModal(false);
+    };
+
+
+
     return (
         <div className="app-container">
             <main className="game-stage">
+                <div className="pool-display" style={{
+                    marginBottom: 20,
+                    background: 'rgba(0,0,0,0.6)',
+                    padding: '10px 30px',
+                    borderRadius: 20,
+                    border: '2px solid var(--primary)',
+                    textAlign: 'center',
+                    alignSelf: 'center'
+                }}>
+                    <div style={{ fontSize: '0.9rem', color: '#ccc', letterSpacing: 1 }}>🏆 累積獎池 </div>
+                    <div style={{ fontSize: '2.5rem', fontWeight: '900', color: 'var(--primary)', textShadow: '0 0 10px rgba(108, 92, 231, 0.5)' }}>
+                        {formatNum(poolAmount)}
+                    </div>
+                </div>
+
                 <div className="Table">
+
                     <div className="cards-area">
                         <Card id="card1" val={cards.c1} />
                         <Card id="card3" val={cards.c3} isMystery={true} />
@@ -286,7 +407,11 @@ const StreamerGame = () => {
                     <div className="game-status-container">
                         {gameState !== 'IDLE' && gameState !== 'END' && (
                             <div className="odds-display" style={{ fontSize: '1.2rem', marginBottom: 10 }}>
-                                賠率: <span style={{ color: 'var(--primary)' }}>{cards.c1 === cards.c2 ? '平手/撞柱' : `${currentOdds}x`}</span>
+                                {cards.c1 !== null && cards.c1 === cards.c2 ? (
+                                    <span>🎲 <span style={{ color: 'var(--accent)' }}>選擇比大或比小</span></span>
+                                ) : (
+                                    <>賠率: <span style={{ color: 'var(--primary)' }}>{cards.c1 === cards.c2 ? '特殊' : `${currentOdds}x`}</span></>
+                                )}
                             </div>
                         )}
                         <div className="game-status">{gameMessage}</div>
@@ -309,7 +434,33 @@ const StreamerGame = () => {
 
                 <div className="controls-overlay">
                     {gameState === 'PLAYING' && cards.c2 !== null && (
-                        <button className="btn-action giant-btn" onClick={revealCard3}>🔥 射門! 🔥</button>
+                        cards.c1 === cards.c2 ? (
+                            <div style={{ display: 'flex', gap: 20 }}>
+                                <button className="btn-action giant-btn"
+                                    style={{ background: 'var(--primary-dark)', fontSize: '1.2rem', gap: 10, minWidth: 150, whiteSpace: 'nowrap' }}
+                                    onClick={() => revealCard3('low')}
+                                    disabled={highLowOdds.low === 0}
+                                >
+                                    ⬇️ 押小
+                                    <span style={{ fontSize: '0.9rem', color: '#2d3436' }}>(1:{highLowOdds.low})</span>
+                                </button>
+                                <button className="btn-action giant-btn"
+                                    style={{ background: 'var(--danger)', fontSize: '1.2rem', gap: 10, minWidth: 150, whiteSpace: 'nowrap' }}
+                                    onClick={() => revealCard3('high')}
+                                    disabled={highLowOdds.high === 0}
+                                >
+                                    ⬆️ 押大
+                                    <span style={{ fontSize: '0.9rem', color: 'white' }}>(1:{highLowOdds.high})</span>
+                                </button>
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', gap: 15 }}>
+                                <button className="btn-action giant-btn" onClick={() => handleGiveUp()} style={{ background: '#636e72', fontSize: '1rem', minWidth: 100, whiteSpace: 'nowrap' }}>
+                                    🏳️ 放棄
+                                </button>
+                                <button className="btn-action giant-btn" onClick={() => revealCard3()} style={{ whiteSpace: 'nowrap' }}>🔥 射門!</button>
+                            </div>
+                        )
                     )}
 
                     {gameState === 'END' && (
@@ -332,6 +483,9 @@ const StreamerGame = () => {
                     </button>
                     <button className="btn-secondary-pop" onClick={() => setShowImportModal(true)} style={{ marginBottom: 10 }}>
                         <RefreshCw size={18} /> 匯入鏈上數據
+                    </button>
+                    <button className="btn-action-small" onClick={() => setShowSecureModal(true)} style={{ width: '100%', background: 'var(--success)', border: 'none' }}>
+                        <ShieldCheck size={18} /> 重置獎池
                     </button>
                 </div>
 
@@ -373,7 +527,7 @@ const StreamerGame = () => {
                     <ul className="rules-list">
                         <RuleItem icon="🔥" title="撞柱 (射中門柱)" desc="賠付 x2 (輸2倍)" color="var(--danger)" />
                         <RuleItem icon="💥" title="三條 (全部相同)" desc="賠付 x3 (輸3倍)" color="var(--danger)" />
-                        <RuleItem icon="⚽" title="進球 (範圍內)" desc="贏取獎金 (倍率區間 1.1x - 13x)" color="var(--success)" />
+                        <RuleItem icon="⚽" title="進球 (範圍內)" desc="贏取獎金 (最高 100x)" color="var(--success)" />
                         <RuleItem icon="❌" title="射歪 (範圍外)" desc="全輸" color="var(--danger)" />
                     </ul>
                 </div>
@@ -494,6 +648,39 @@ const StreamerGame = () => {
                         </div>
                         <div className="modal-footer">
                             <button className="btn-confirm" onClick={() => setShowPaymentModal(false)}>已確認收款</button>
+                        </div>
+                    </div>
+                </dialog>
+            )}
+            {showSecureModal && (
+                <dialog className="cyber-modal" open>
+                    <div className="modal-wrapper">
+                        <h3>🛡️ 獲利 / 重置獎池</h3>
+                        <div style={{ marginBottom: 20 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                                <span>目前累積:</span>
+                                <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontSize: '1.2rem' }}>{formatNum(poolAmount)}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10, alignItems: 'center' }}>
+                                <span>重置目標 (保底):</span>
+                                <input
+                                    type="number"
+                                    value={basePoolAmount}
+                                    onChange={e => setBasePoolAmount(Number(e.target.value))}
+                                    style={{ width: 100, padding: 5, borderRadius: 5, background: '#333', border: '1px solid #555', color: 'white' }}
+                                />
+                            </div>
+                            <hr style={{ borderColor: '#444', margin: '15px 0' }} />
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem' }}>
+                                <span>顯示獲利:</span>
+                                <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>
+                                    {poolAmount > basePoolAmount ? formatNum(poolAmount - basePoolAmount) : 0}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="modal-footer">
+                            <button className="btn-cancel" onClick={() => setShowSecureModal(false)}>取消</button>
+                            <button className="btn-confirm" onClick={handleSecureProfits}>確認重置</button>
                         </div>
                     </div>
                 </dialog>

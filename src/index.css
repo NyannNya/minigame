@@ -231,7 +231,7 @@ body {
 /* === Controls Overlay === */
 .controls-overlay {
   position: absolute;
-  bottom: 50px;
+  bottom: 10px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -325,7 +325,7 @@ button {
   color: white;
   box-shadow: 0 6px 0 #c445b0;
   font-size: 1.5rem;
-  padding: 15px 40px;
+  padding: 12px 30px;
 }
 
 .btn-action-small {

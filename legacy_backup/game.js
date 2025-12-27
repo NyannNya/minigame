@@ -356,13 +356,13 @@ const game = {
                 message = "三條撞柱! (賠付 3x)";
             } else {
                 result = 'PUSH';
-                message = "對子 (平手)";
+                message = "平手";
             }
         } else {
             // Standard Case
             if (c3 > low && c3 < high) {
                 result = 'WIN';
-                message = "進球! (贏!)";
+                message = "進球!";
                 // Payout based on Dynamic Odds
                 payout = game.currentPlayer.amount * game.currentOdds;
             } else if (c3 === low || c3 === high) {
@@ -370,7 +370,7 @@ const game = {
                 message = "撞柱! (賠付 2x)"; // User loses 2x Bet
             } else {
                 result = 'LOSE';
-                message = "射歪了! (輸)";
+                message = "射歪了!";
             }
         }
 
