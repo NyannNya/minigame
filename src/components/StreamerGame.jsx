@@ -44,12 +44,22 @@ const StreamerGame = () => {
     const [showPayoutModal, setShowPayoutModal] = useState(false);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
 
+    // Settings
+    const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [minBet, setMinBet] = useState(() => parseInt(localStorage.getItem('minBet')) || 50000);
+    const [maxBet, setMaxBet] = useState(() => parseInt(localStorage.getItem('maxBet')) || 1000000);
+
     // Inputs
     const [modalAddress, setModalAddress] = useState('');
     const [modalNickname, setModalNickname] = useState('');
     const [modalAvatar, setModalAvatar] = useState('');
-    const [modalAmount, setModalAmount] = useState(10000);
+    const [modalAmount, setModalAmount] = useState(50000); // Default to new Min
     const [replayAmount, setReplayAmount] = useState(0);
+
+    // Settings Inputs
+    const [tempMinBet, setTempMinBet] = useState(50000);
+    const [tempMaxBet, setTempMaxBet] = useState(1000000);
+
 
     // Address Book State
     const [nicknameMap, setNicknameMap] = useState(() => {
@@ -83,6 +93,11 @@ const StreamerGame = () => {
         localStorage.setItem('leaderboardData', JSON.stringify(leaderboard));
     }, [leaderboard]);
 
+    useEffect(() => {
+        localStorage.setItem('minBet', minBet.toString());
+        localStorage.setItem('maxBet', maxBet.toString());
+    }, [minBet, maxBet]);
+
     // Manual Refresh only - Auto logic removed
 
 
@@ -110,11 +125,20 @@ const StreamerGame = () => {
         }
     };
 
+    const handleSaveSettings = () => {
+        if (tempMinBet > tempMaxBet) return alert("底注不得大於上限");
+        setMinBet(tempMinBet);
+        setMaxBet(tempMaxBet);
+        // Update default amount for next user
+        setModalAmount(tempMinBet);
+        setShowSettingsModal(false);
+    };
+
     // --- Game Logic ---
     const manualAddPlayer = () => {
         if (!modalAddress) return alert("請輸入錢包地址");
-        if (modalAmount < 10000) return alert("最低下注 10,000");
-        if (modalAmount > 10000000) return alert("單筆上限 10,000,000");
+        if (modalAmount < minBet) return alert(`最低下注 ${formatNum(minBet)}`);
+        if (modalAmount > maxBet) return alert(`單筆上限 ${formatNum(maxBet)}`);
 
         if (modalNickname) {
             setNicknameMap(prev => ({ ...prev, [modalAddress]: modalNickname }));
@@ -167,21 +191,23 @@ const StreamerGame = () => {
     const handleEditAmount = () => {
         if (!currentPlayer) return;
         const oldAmount = currentPlayer.amount;
-        const newAmountStr = prompt(`修改下注金額 (目前: ${formatNum(oldAmount)})\n\n若金額減少，餘額將自動退回排隊列表。`, oldAmount);
+        // Limit warning in prompt
+        const newAmountStr = prompt(`修改下注金額 (範圍: ${formatNum(minBet)} - ${formatNum(maxBet)})\n\n若金額減少，餘額將自動退回排隊列表。`, oldAmount);
 
         if (newAmountStr === null) return;
 
         const newAmount = parseFloat(newAmountStr);
-        if (isNaN(newAmount) || newAmount < 10000) return alert("最低下注 10,000");
-        if (newAmount > 10000000) return alert("單筆上限 10,000,000");
+        if (isNaN(newAmount) || newAmount < minBet) return alert(`最低下注 ${formatNum(minBet)}`);
+        if (newAmount > maxBet) return alert(`單筆上限 ${formatNum(maxBet)}`);
 
         if (newAmount < oldAmount) {
             // Refund Logic
             const refund = oldAmount - newAmount;
-            if (refund >= 10000) { // Only refund if valid amount? Or any amount? Let's say any positive.
-                // Actually keeping min bet rule for refund might be annoying if refund is small (e.g. 5000 left).
-                // But queue usually expects playable amounts. Let's just allow it for now or warn?
-                // User said "自動餘額回到排隊列表". I'll just put it back.
+            if (refund >= minBet) {
+                // Only queue refund if it meets minBet, OR just queue it anyway but warn?
+                // Logic: Refund queue entry should also respect minBet if possible, 
+                // but for refunds, usually we just want to return money. 
+                // Let's allow any refund amount but it might be unplayable if < minBet.
                 const refundPlayer = {
                     ...currentPlayer,
                     amount: refund,
@@ -190,7 +216,7 @@ const StreamerGame = () => {
                 setQueue(prev => [...prev, refundPlayer]);
                 alert(`已將餘額 ${formatNum(refund)} 退回排隊列表`);
             } else {
-                if (refund > 0) alert(`餘額 ${formatNum(refund)} 過小，未退回 (需大於 0)`); // Should basically never happen with 10k min but logical check
+                if (refund > 0) alert(`餘額 ${formatNum(refund)} 過小，未退回 (需大於 ${formatNum(minBet)})`);
             }
         }
 
@@ -240,16 +266,6 @@ const StreamerGame = () => {
             // Pair Case: High / Low
             const highCount = 13 - c1;
             const lowCount = c1 - 1;
-            // Should we fix High/Low to 2.0x as well? User said "Winning fixed 2x".
-            // Since "Winning fixed 2x" was in the context of "Adjust Multiplier", and usually refers to the main game.
-            // Leaving High/Low as calculated for now unless explicitly asked, but clamping min to 2.0x below.
-
-            // Actually, to be safe and consistent with "Winning fixed 2x", let's apply the multiplier logic if requested.
-            // But the prompt says "倍率調整 中獎固定 2x" (Multiplier adjustment, Winning fixed 2x).
-            // It's safest to leave High/Low dynamic (fairness) OR fix them too?
-            // Given the context of "Streamer Game" which is often Dragon Gate, the "odds" usually refers to the main game.
-            // I will leave High/Low dynamic but ensure they respect the 2x floor if applicable. 
-            // However, for the MAIN game (gap > 0), it is now typically 2x fixed.
 
             if (highCount > 0) hlOdds.high = 2.0;
             if (lowCount > 0) hlOdds.low = 2.0;
@@ -268,18 +284,7 @@ const StreamerGame = () => {
 
         // Apply Caps to Standard Odds
         if (c1 !== c2) {
-            // Fixed 2.0x.
-            // Logic: If bankruptcy cap is lower than 2.0, technically we should lower it, 
-            // but user said "Fixed 2x".
-            // We will respect bankruptcy cap if it causes a crash (negative pool), 
-            // but usually "Fixed 2x" implies the HOUSE takes the risk or we just block the bet before (which we do with Max Raise).
-            // For display purposes, we show 2x.
             if (runBankruptcyCheck && odds > bankruptcyCap) odds = bankruptcyCap;
-
-            // Enforce floor 2.0 if possible (but bankruptcy overrides) -> Actually user wants Fixed 2x.
-            // If pool is 0, odds 2x means payout 0? No payout is Amount * Odds.
-            // If pool is 0, we can't pay. 
-            // Let's just set it to 2.0 and let the payout logic handle the subtraction (potentially negative pool).
             odds = 2.0;
         }
 
@@ -435,8 +440,8 @@ const StreamerGame = () => {
     };
 
     const replayRound = () => {
-        if (!replayAmount || replayAmount < 10000) return alert("最低下注 10,000");
-        if (replayAmount > 10000000) return alert("單筆上限 10,000,000");
+        if (!replayAmount || replayAmount < minBet) return alert(`最低下注 ${formatNum(minBet)}`);
+        if (replayAmount > maxBet) return alert(`單筆上限 ${formatNum(maxBet)}`);
         nextRound();
         const newPlayer = { ...currentPlayer, amount: replayAmount, timestamp: new Date().toLocaleTimeString() };
         setCurrentPlayer(newPlayer);
@@ -496,12 +501,24 @@ const StreamerGame = () => {
     const importSelected = () => {
         const toAdd = scanResults.filter(tx => selectedTx[tx.hash]);
         if (toAdd.length === 0) return alert("請選擇交易");
+
+        // Filter out bad amounts if needed? Or just import what came in.
+        // Assuming wallet transfers are valid, but we might want to flag those < minBet?
+        // For now, let's just import them.
+
         const newItems = toAdd.map(tx => ({
             from: tx.from,
             nickname: getNickname(tx.from), // Helper lookup
             amount: parseFloat(tx.val),
             timestamp: new Date().toLocaleTimeString()
         }));
+
+        // Optional: Filter enforced limits on import?
+        // User might send 5000 NESO, we can't stop them on chain.
+        // But we can filter here.
+        // Let's filter on queue addition or just highlight?
+        // Stick to simple behavior: Add to queue. If < minBet, they can edit amount or add more later?
+
         setQueue([...queue, ...newItems]);
         setShowImportModal(false);
         setScanResults([]);
@@ -529,25 +546,20 @@ const StreamerGame = () => {
         if (!currentPlayer) return;
 
         // 1. Calculate Max Bet allowed by Pool (Bankruptcy Protection)
-        // Payout = Bet * Odds. We need Payout <= Pool.
-        // So MaxBet = Pool / Odds.
-        // We use currentOdds. If specific High/Low logic is active, it's safer to use the higher odd or just currentOdds for the general 'Raise' button which appears before choice? 
-        // Actually 'Raise' appears when c1 != c2. If c1==c2, buttons are High/Low. Raise is for Dragon Gate.
-
         let safeMax = Infinity;
         if (currentOdds > 0) {
             safeMax = Math.floor(poolAmount / currentOdds);
         }
 
-        // 2. Desired Logic: Double the bet, but max 1,000,000, and max safeMax
+        // 2. Desired Logic: Double the bet, but max maxBet (Settings), and max safeMax
         const targetAmount = currentPlayer.amount * 2;
-        const ABSOLUTE_MAX = 10000000;
+        const ABSOLUTE_MAX = maxBet; // Use User Setting
 
         // Final amount is minimum of all constraints
         const newAmount = Math.min(targetAmount, ABSOLUTE_MAX, safeMax);
 
         if (newAmount <= currentPlayer.amount) {
-            return alert(`無法加註: 獎池餘額不足以支付賠付 (最大可下: ${formatNum(safeMax)})`);
+            return alert(`無法加註: 達上限或獎池不足 (最大: ${formatNum(Math.min(ABSOLUTE_MAX, safeMax))})`);
         }
 
         setCurrentPlayer(prev => ({ ...prev, amount: newAmount }));
@@ -723,7 +735,7 @@ const StreamerGame = () => {
                                     }}
                                 >
                                     加碼 (+{(() => {
-                                        const ABSOLUTE_MAX = 10000000;
+                                        const ABSOLUTE_MAX = maxBet; // Use Setting
                                         const original = currentPlayer?.amount || 0;
                                         const target = original * 2;
                                         const safeMax = Math.floor(poolAmount / currentOdds);
@@ -755,9 +767,18 @@ const StreamerGame = () => {
                     <button className="btn-secondary-pop btn-uniform" onClick={() => setShowImportModal(true)}>
                         <RefreshCw size={18} /> 匯入鏈上數據
                     </button>
-                    <button className="btn-action-small btn-uniform" onClick={() => setShowSecureModal(true)} style={{ width: '100%', background: 'var(--success)', border: 'none' }}>
-                        <ShieldCheck size={18} /> 重置獎池
-                    </button>
+                    <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+                        <button className="btn-action-small btn-uniform" onClick={() => setShowSecureModal(true)} style={{ flex: 1, background: 'var(--success)', border: 'none' }}>
+                            <ShieldCheck size={18} /> 重置
+                        </button>
+                        <button className="btn-action-small btn-uniform" onClick={() => {
+                            setTempMinBet(minBet);
+                            setTempMaxBet(maxBet);
+                            setShowSettingsModal(true);
+                        }} style={{ flex: 1, background: '#636e72', border: 'none' }}>
+                            <Settings size={18} /> 設定
+                        </button>
+                    </div>
                 </div>
 
                 <div className="panel-card queue-section">
@@ -805,6 +826,28 @@ const StreamerGame = () => {
             </aside>
 
             {/* Modals */}
+            {showSettingsModal && (
+                <dialog className="cyber-modal" open>
+                    <div className="modal-wrapper modal-add">
+                        <div className="modal-content-backdrop">
+                            <h3>⚙️ 遊戲設定 (上下限)</h3>
+                            <div className="input-group">
+                                <label>單注下限 (Min Bet)</label>
+                                <input type="number" value={tempMinBet} onChange={e => setTempMinBet(parseInt(e.target.value) || 0)} />
+                            </div>
+                            <div className="input-group" style={{ marginTop: 10 }}>
+                                <label>單注上限 (Max Bet)</label>
+                                <input type="number" value={tempMaxBet} onChange={e => setTempMaxBet(parseInt(e.target.value) || 0)} />
+                            </div>
+                            <div className="modal-footer">
+                                <button className="btn-cancel" onClick={() => setShowSettingsModal(false)}>取消</button>
+                                <button className="btn-confirm" onClick={handleSaveSettings}>儲存設定</button>
+                            </div>
+                        </div>
+                    </div>
+                </dialog>
+            )}
+
             {showAddModal && (
                 <dialog className="cyber-modal" open>
                     <div className="modal-wrapper modal-add">
